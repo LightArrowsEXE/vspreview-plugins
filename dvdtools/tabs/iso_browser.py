@@ -390,7 +390,21 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         self.dump_audio_button.setEnabled(bool(info['audio_tracks']))
         self._update_info_label(info)
-        self._set_output(self.current_title.video)
+
+        self._update_outputs(title_idx, angle)
+
+    def _update_outputs(self, title_idx: int, angle: int | None) -> None:
+        """Update the outputs with the new video node."""
+
+        new_output = self.plugin.main.outputs[self.plugin.main.current_output.index].with_node(self.current_node)
+        new_output.name = f"Title {title_idx}" + (f" Angle {angle}" if angle else "")
+
+        self.plugin.main.outputs.items.clear()
+        self.plugin.main.outputs.items.append(new_output)
+        new_output.index = -1
+
+        self.plugin.main.refresh_video_outputs()
+        self.plugin.main.switch_output(0)
 
     def _update_info_label(self, info: TitleInfo) -> None:
         """Update info label with title details."""
@@ -411,16 +425,6 @@ class IsoBrowserTab(AbstractSettingsWidget):
             info_text += ["Audio Track(s): None"]
 
         self.info_label.setText("\n".join(info_text))
-
-    def _set_output(self, video: vs.VideoNode) -> None:
-        """Set output and render first frame."""
-
-        try:
-            set_output(video)
-            self.plugin.main.current_output.render_frame(Frame(0))
-        except AttributeError as e:
-            error(f'Failed to load title: {e}\n{format_exc()}')
-            QMessageBox.critical(self, "Error", f"Failed to load title: {str(e)}")
 
     def _format_duration(self, duration_secs: float) -> str:
         """Format duration in seconds to HH:MM:SS.mmm format."""
@@ -463,7 +467,15 @@ class IsoBrowserTab(AbstractSettingsWidget):
                 return
 
             if self.plugin.main.current_output.node is not self.current_title.video:
-                self._set_output(self.current_title.video)
+                main = self.plugin.main
+                new_output = main.outputs[index].with_node(self.current_title.video)
+                new_output.name = (
+                    f"Title {self.current_title._title}"
+                    + (f" Angle {self.current_title.angle}" if hasattr(self.current_title, 'angle') else "")
+                )
+                new_output.index = index
+                main.outputs.items[index] = new_output
+                main.refresh_video_outputs()
                 return
 
             self.current_title.frame = current_frame.value

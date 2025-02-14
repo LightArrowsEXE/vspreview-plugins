@@ -13,10 +13,10 @@ Supports everything `vssource.IsoFile` supports.
 - Navigate through titles
 - View title properties
 - Dump audio tracks to WAV/AC3 files
+- Output video node
 
 ### Planned
 
-- Replace current main window VideoNode with the IsoFile video
 - Navigation through angles
 - Navigation to chapters
 - Output audio nodes
