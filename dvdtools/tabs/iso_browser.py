@@ -5,18 +5,18 @@ from traceback import format_exc
 from typing import Any, TypedDict
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-    QMessageBox, QTreeWidget, QTreeWidgetItem, QWidget
-)
-
+from PyQt6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout,
+                             QInputDialog, QLabel, QMessageBox, QTreeWidget,
+                             QTreeWidgetItem, QWidget)
 from vspreview import set_output
 from vspreview.core import Frame
-from vspreview.core.abstracts import PushButton, AbstractSettingsWidget
+from vspreview.core.abstracts import AbstractSettingsWidget, PushButton
 from vspreview.plugins import AbstractPlugin
 from vssource import IsoFile, Title
 from vssource.formats.dvd.IsoFileCore import IsoFileCore
-from vstools import vs, SPath
+from vstools import CustomNotImplementedError, SPath, core, vs
+
+from ..utils.dump_pcm import dump_pcm
 
 __all__ = [
     'IsoBrowserTab'
@@ -60,7 +60,7 @@ class TitleInfo(TypedDict):
 class IsoBrowserTab(AbstractSettingsWidget):
     """Tab for browsing DVD/BD ISO files and their titles/angles."""
 
-    __slots__ = ('file_label', 'load_button', 'tree', 'info_label', 'dump_ac3_button')
+    __slots__ = ('file_label', 'load_button', 'tree', 'info_label', 'dump_audio_button')
 
     def __init__(self, plugin: AbstractPlugin) -> None:
         super().__init__()
@@ -84,8 +84,8 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         self.file_label = QLabel("No ISO loaded")
         self.load_button = PushButton("Load ISO", self, clicked=self._on_load_iso)
-        self.dump_ac3_button = PushButton("Dump AC3", self, clicked=self._on_dump_ac3)
-        self.dump_ac3_button.setEnabled(False)
+        self.dump_audio_button = PushButton("Dump Audio", self, clicked=self._on_dump_audio)
+        self.dump_audio_button.setEnabled(False)
         self.tree = QTreeWidget()
         self.tree.clear()
         self.info_label = QLabel()
@@ -107,7 +107,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
         file_layout = QHBoxLayout(file_widget)
         file_layout.addWidget(self.file_label)
         file_layout.addWidget(self.load_button)
-        file_layout.addWidget(self.dump_ac3_button)
+        file_layout.addWidget(self.dump_audio_button)
 
         self.vlayout.addWidget(file_widget)
         self.vlayout.addWidget(self.tree)
@@ -120,7 +120,8 @@ class IsoBrowserTab(AbstractSettingsWidget):
         self.file_label.setText("No ISO loaded")
         self._init_state()
         self.tree.clear()
-        self.dump_ac3_button.setEnabled(False)
+        self.dump_audio_button.setEnabled(False)
+        self.info_label.setText("Select a title to view details")
 
     def _on_load_iso(self) -> None:
         """Handle ISO file loading."""
@@ -138,84 +139,104 @@ class IsoBrowserTab(AbstractSettingsWidget):
             self.iso_path = SPath(file_path)
             self.iso_file = IsoFile(self.iso_path)
             self.file_label.setText(self.iso_path.name)
+            self.info_label.setText("Select a title to view details")
             self._populate_tree()
         except Exception as e:
             error(f'Failed to load ISO: {e}\n{format_exc()}')
             self._reset_iso_state()
             QMessageBox.critical(self, "Error", f"Failed to load ISO: {str(e)}")
 
-    def _on_dump_ac3(self) -> None:
-        """Handle AC3 dumping."""
+    def _on_dump_audio(self) -> None:
+        """Handle audio track dumping."""
 
-        if not self._validate_title_for_ac3():
+        if not self._validate_title_for_audio():
             return
 
-        if not (ac3_tracks := self._get_ac3_tracks()):
-            QMessageBox.warning(self, "Warning", "No AC3 audio tracks found in this title.")
+        if not (audio_tracks := self._get_audio_tracks()):
+            QMessageBox.warning(self, "Warning", "No audio tracks found in this title.")
             return
 
-        if (track_idx := self._select_ac3_track(ac3_tracks)) is None:
+        if (track_idx := self._select_audio_track(audio_tracks)) is None:
             return
 
-        if not (file_path := self._get_ac3_save_path(track_idx)):
+        if not (file_path := self._get_audio_save_path(track_idx, audio_tracks[track_idx][1])):
             return
 
-        self._dump_ac3_to_file(file_path, track_idx)
+        self._dump_audio_to_file(file_path, track_idx)
 
-    def _validate_title_for_ac3(self) -> bool:
-        """Check if current title is valid for AC3 dumping."""
+    def _validate_title_for_audio(self) -> bool:
+        """Check if current title is valid for audio dumping."""
 
         return bool(self.current_title and hasattr(self.current_title, '_audios'))
 
-    def _get_ac3_tracks(self) -> list[tuple[int, str]]:
-        """Get list of AC3 tracks from current title."""
+    def _get_audio_tracks(self) -> list[tuple[int, str]]:
+        """Get list of audio tracks from current title."""
 
         return [
             (i, audio) for i, audio in enumerate(self.current_title._audios)
-            if audio.startswith('ac3')
+            if audio.startswith(('ac3', 'lpcm', 'pcm'))
         ]
 
-    def _select_ac3_track(self, ac3_tracks: list[tuple[int, str]]) -> int | None:
-        """Handle AC3 track selection dialog if multiple tracks exist."""
+    def _select_audio_track(self, audio_tracks: list[tuple[int, str]]) -> int | None:
+        """Handle audio track selection dialog if multiple tracks exist."""
 
-        if len(ac3_tracks) == 1:
-            return ac3_tracks[0][0]
+        if len(audio_tracks) == 1:
+            return audio_tracks[0][0]
 
-        track_items = [f"Track {i}: {audio}" for i, audio in ac3_tracks]
+        track_items = [f"Track {i}: {audio}" for i, audio in audio_tracks]
 
         track, ok = QInputDialog.getItem(
-            self, "Select AC3 Track",
-            "Multiple AC3 tracks found. Please select one:",
+            self, "Select Audio Track",
+            "Multiple audio tracks found. Please select one:",
             track_items, 0, False
         )
 
         if not ok:
             return None
 
-        return ac3_tracks[track_items.index(track)][0]
+        return audio_tracks[track_items.index(track)][0]
 
-    def _dump_ac3_to_file(self, file_path: str, track_idx: int) -> None:
-        """Dump AC3 track to specified file."""
+    def _dump_audio_to_file(self, file_path: str, track_idx: int) -> None:
+        """Dump audio track to specified file."""
 
         try:
-            self.current_title.dump_ac3(self.iso_path / file_path, track_idx)
+            if self.current_title._audios[track_idx].startswith('ac3'):
+                debug(f'Dumping AC3 for title {self.current_title._title} track {track_idx}')
+                self.current_title.dump_ac3(self.iso_path / file_path, track_idx)
+            elif self.current_title._audios[track_idx].startswith(('lpcm', 'pcm')):
+                debug(f'Dumping PCM for title {self.current_title._title} track {track_idx}')
+                self._dump_pcm(self.iso_path / file_path, track_idx)
+            else:
+                raise CustomNotImplementedError(
+                    f"Unsupported audio format: {self.current_title._audios[track_idx]}",
+                    self._dump_audio_to_file
+                )
         except Exception as e:
-            error(f'Failed to dump AC3: {e}\n{format_exc()}')
-            QMessageBox.critical(self, "Error", f"Failed to dump AC3: {str(e)}")
+            error(f'Failed to dump audio: {e}\n{format_exc()}')
+            QMessageBox.critical(self, "Error", f"Failed to dump audio: {str(e)}")
 
-    def _get_ac3_save_path(self, track_idx: int = 0) -> str | None:
-        """Get save path for AC3 dump."""
+    def _dump_pcm(self, file_path: str, track_idx: int) -> None:
+        """Dump PCM audio track to WAV file."""
 
-        default_name = self._generate_ac3_filename(track_idx)
+        try:
+            self.current_title._assert_dvdsrc2(self._dump_pcm)
+        except Exception as e:
+            error(f'Failed to dump PCM: {e}\n{format_exc()}')
+            QMessageBox.critical(self, "Error", f"Failed to dump PCM: {str(e)}")
+            return
 
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save AC3 Audio", default_name, "AC3 files (*.ac3)"
+        # TODO: Figure out why the audio is so sped up for this wtf?
+        pcm_node = core.dvdsrc2.FullVtsLpcm(
+            self.current_title._core.iso_path.to_str(),
+            self.current_title._vts,
+            track_idx,
+            self.current_title._dvdsrc_ranges
         )
 
-        return file_path
+        dump_pcm(pcm_node, file_path)
 
-    def _generate_ac3_filename(self, track_idx: int) -> str:
-        """Generate default filename for AC3 dump."""
+    def _get_audio_save_path(self, track_idx: int, audio_type: str) -> str | None:
+        """Get save path for audio dump."""
 
         title_item = self.tree.currentItem()
         title_text = title_item.text(0)
@@ -223,12 +244,20 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         filename = f"{self.iso_path.stem}_"
         filename += f"title_{title_idx:02d}"
-        filename += f"_track_{track_idx}.ac3"
+        filename += f"_track_{track_idx}"
 
         if (angle := getattr(self.current_title, 'angle', None)) is not None:
             filename += f"_angle_{angle}"
 
-        return filename
+        extension = '.ac3' if audio_type.startswith('ac3') else '.wav'
+        filename += extension
+        filter_text = "AC3 files (*.ac3)" if extension == '.ac3' else "WAV files (*.wav)"
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Audio", filename, filter_text
+        )
+
+        return file_path
 
     def _populate_tree(self) -> None:
         """Populate the tree widget with titles and angles."""
@@ -359,7 +388,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
         self.current_title = self.iso_file.get_title(title_idx, angle)
         self.current_node = self.current_title.video
 
-        self.dump_ac3_button.setEnabled(bool(info['audio_tracks']))
+        self.dump_audio_button.setEnabled(bool(info['audio_tracks']))
         self._update_info_label(info)
         self._set_output(self.current_title.video)
 
