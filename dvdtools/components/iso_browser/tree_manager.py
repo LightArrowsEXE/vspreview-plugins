@@ -46,7 +46,7 @@ class ISOTreeManager:
         self.parent.title_info.clear()
 
         if not self.parent.iso_file:
-            debug('No ISO file loaded')
+            debug('No DVD loaded')
             return
 
         try:
@@ -228,6 +228,25 @@ class ISOTreeManager:
         self.parent.current_title = self.parent.iso_file.get_title(title_idx, angle)
         self.parent.current_node = self.parent.current_title.video
 
+        # Update chapter spinboxes
+        chapter_count = info['chapter_count']
+        has_chapters = chapter_count > 0
+
+        self.parent.chapter_label.setEnabled(has_chapters)
+        self.parent.chapter_start_spin.setEnabled(has_chapters)
+        self.parent.chapter_end_spin.setEnabled(has_chapters)
+        self.parent.chapter_to_label.setEnabled(has_chapters)
+        self.parent.chapter_dump_label.setEnabled(has_chapters)
+
+        if has_chapters:
+            self.parent.chapter_start_spin.setMaximum(chapter_count)
+            self.parent.chapter_end_spin.setMaximum(chapter_count)
+            self.parent.chapter_end_spin.setValue(chapter_count)
+
+        # Update FFmpeg handler chapter values
+        self.parent.ffmpeg_handler.chapter_start = self.parent.chapter_start_spin.value() if has_chapters else None
+        self.parent.ffmpeg_handler.chapter_end = self.parent.chapter_end_spin.value() if has_chapters else None
+
         self.parent.dump_title_button.setEnabled(bool(info['audio_tracks']))
         self._update_info_label(info)
         self._update_outputs(title_idx, angle)
@@ -300,19 +319,72 @@ class ISOTreeManager:
         """Populate chapters tree with chapter information."""
 
         self.chapters_tree.clear()
+        chapters = info.get('chapters', [])
 
-        if not info.get('chapters'):
-            self.chapters_tree.setVisible(False)
+        # Update chapter spinbox visibility and values based on chapter availability
+        has_chapters = bool(chapters)
+
+        # Show/hide chapter controls
+        self.chapters_tree.setVisible(has_chapters)
+        self.parent.chapter_widget.setVisible(has_chapters)
+
+        if not has_chapters:
             return
 
-        fps = info['fps']
+        # Set spinbox ranges
+        chapter_count = len(chapters)
+        self.parent.chapter_start_spin.setMaximum(chapter_count)
+        self.parent.chapter_end_spin.setMaximum(chapter_count)
+        self.parent.chapter_end_spin.setValue(chapter_count)
 
-        for i, frame in enumerate(info['chapters'], 1):
+        # Connect value changed signals to ensure valid ranges
+        self.parent.chapter_start_spin.valueChanged.connect(self._on_chapter_start_changed)
+        self.parent.chapter_end_spin.valueChanged.connect(self._on_chapter_end_changed)
+
+        # Update FFmpeg handler chapter values
+        self.parent.ffmpeg_handler.chapter_start = self.parent.chapter_start_spin.value()
+        self.parent.ffmpeg_handler.chapter_end = self.parent.chapter_end_spin.value()
+
+        # Populate chapter tree
+        fps = info['fps']
+        for i, frame in enumerate(chapters, 1):
             timestamp = self._format_duration(frame / fps)
             chapter_item = QTreeWidgetItem(self.chapters_tree, [f"Chapter {i} - Frame {frame} - {timestamp}"])
             chapter_item.setData(0, Qt.ItemDataRole.UserRole, {'frame': frame})
 
-        self.chapters_tree.setVisible(True)
+    def _on_chapter_start_changed(self, value: int) -> None:
+        """Ensure start chapter doesn't exceed end chapter."""
+        if value > self.parent.chapter_end_spin.value():
+            self.parent.chapter_end_spin.setValue(value)
+
+        # Store chapter values in title info
+        title_idx = self.parent.current_title._title + 1
+        angle = getattr(self.parent.current_title, 'angle', None)
+        title_key = (title_idx, angle)
+
+        debug(f'Updating chapter start: title_key={title_key}, value={value}')
+        if title_key in self.parent.title_info:
+            debug(f'Current title_info before update: {self.parent.title_info[title_key]}')
+            self.parent.title_info[title_key]['chapter_start'] = value
+            self.parent.ffmpeg_handler.chapter_start = value
+            debug(f'Updated title_info: {self.parent.title_info[title_key]}')
+
+    def _on_chapter_end_changed(self, value: int) -> None:
+        """Ensure end chapter isn't less than start chapter."""
+        if value < self.parent.chapter_start_spin.value():
+            self.parent.chapter_start_spin.setValue(value)
+
+        # Store chapter values in title info
+        title_idx = self.parent.current_title._title + 1
+        angle = getattr(self.parent.current_title, 'angle', None)
+        title_key = (title_idx, angle)
+
+        debug(f'Updating chapter end: title_key={title_key}, value={value}')
+        if title_key in self.parent.title_info:
+            debug(f'Current title_info before update: {self.parent.title_info[title_key]}')
+            self.parent.title_info[title_key]['chapter_end'] = value
+            self.parent.ffmpeg_handler.chapter_end = value
+            debug(f'Updated title_info: {self.parent.title_info[title_key]}')
 
     def _on_chapter_selected(self, item: QTreeWidgetItem) -> None:
         """Handle chapter selection by jumping to the chapter frame."""
@@ -329,7 +401,7 @@ class ISOTreeManager:
 
     def clear(self) -> None:
         """Clear the tree widgets."""
-
         self.tree.clear()
         self.chapters_tree.clear()
         self.chapters_tree.setVisible(False)
+        self.parent.chapter_widget.setVisible(False)  # Hide chapter controls when clearing

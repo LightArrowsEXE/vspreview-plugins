@@ -1,7 +1,7 @@
 from logging import warning, DEBUG, debug, error, getLogger
 from traceback import format_exc
 import subprocess
-from typing import List
+from typing import Any, List
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QProgressDialog
@@ -18,143 +18,130 @@ class FFmpegHandler:
     def __init__(self, parent) -> None:
         self.parent = parent
         self.log_level = getLogger().getEffectiveLevel()
+        # Add default chapter values
+        self.chapter_start = None
+        self.chapter_end = None
 
     def dump_all_titles(self) -> None:
-        """Dump all titles to files using ffmpeg."""
+        """Dump all titles from the ISO."""
 
-        debug('Dumping all titles')
-
-        if not self.parent.iso_file:
-            error('No ISO file loaded')
+        if not self._check_ffmpeg():
             return
 
-        output_dir = QFileDialog.getExistingDirectory(
-            self.parent,
-            "Select Output Directory",
-            str(self.parent.iso_path.parent if self.parent.iso_path else '.')
+        # Get save directory
+        save_dir = QFileDialog.getExistingDirectory(
+            self.parent, "Select output directory", str(self.parent.iso_path.parent)
         )
 
-        if not output_dir:
-            debug('User cancelled directory selection')
+        if not save_dir:
             return
 
-        output_dir = SPath(output_dir)
-        title_count = self.parent.iso_file.title_count
+        save_dir = SPath(save_dir)
 
-        progress = QProgressDialog("Dumping all titles...", "Cancel", 0, title_count, self.parent)
+        # Get all unique titles and their info
+        unique_titles = {}
+
+        for i, ((title_idx, _), info) in enumerate(self.parent.title_info.items()):
+            if title_idx not in {k[0] for k in list(self.parent.title_info.keys())[:i]}:
+                unique_titles[title_idx] = info
+
+        total_titles = len(unique_titles)
+        debug(f'Found {total_titles} unique titles')
+
+        # Create progress dialog
+        progress = QProgressDialog("Dumping titles...", "Cancel", 0, total_titles, self.parent)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setWindowTitle("Dumping All Titles")
-        progress.show()
+        progress.setWindowTitle("Dumping Titles")
 
-        successful_dumps = 0
-        failed_dumps = []
+        titles_processed = 0
 
-        # TODO: Async?
         try:
-            for title_idx in range(1, title_count + 1):
+            for title_idx, info in sorted(unique_titles.items()):
                 if progress.wasCanceled():
-                    debug('User cancelled dump all titles')
                     break
 
-                tt_srpt = self.parent.iso_file.ifo0.tt_srpt[title_idx - 1]
-                angle_count = tt_srpt.nr_of_angles
+                # Set full chapter range for this title
+                chapter_count = info.get('chapter_count', 1)
+                self.chapter_start = 1
+                self.chapter_end = chapter_count
 
-                for angle in range(1, angle_count + 1):
-                    progress.setLabelText(
-                        f"Dumping title {title_idx}/{title_count}"
-                        + (f" angle {angle}/{angle_count}" if angle_count > 1 else "")
-                    )
-                    progress.setValue(title_idx - 1)
-                    QApplication.processEvents()
+                angle_count = info.get('angle_count', 1)
+                debug(f'Processing title {title_idx} with {angle_count} angles')
 
-                    try:
-                        self.parent.current_title = self.parent.iso_file.get_title(title_idx, angle if angle_count > 1 else None)
-                        output_name = self._get_title_filename(title_idx, angle if angle_count > 1 else None)
-                        output_path = output_dir / output_name
+                try:
+                    output_path = save_dir / self._get_suggested_filename(title_idx, info)
 
-                        if output_path.exists():
-                            debug(f'Deleting existing file: {output_path}')
-                            output_path.unlink()
+                    if angle_count == 1:
+                        progress.setLabelText(f"Processing title {title_idx}/{total_titles}")
+                        debug(f'Dumping title {title_idx} to {output_path}')
+                        self._dump_title(title_idx, str(output_path))
+                        continue
 
-                        cmd = self._build_ffmpeg_command(self.parent.iso_path.to_str(), output_path.to_str(), angle)
-                        debug(f'FFmpeg command built for title {title_idx}/{angle_count} angle {angle}/{angle_count}: {" ".join(cmd)}')
+                    # Process titles with multiple angles
+                    for angle in range(1, angle_count + 1):
+                        # Replace the last digits in the filename with the current angle
+                        # TODO: Use regular substitution here, but that requires rewriting a bunch of other stuff.
+                        output_path = output_path.with_name(
+                            output_path.name.rsplit('_', 1)[0] + f'_{angle:02d}.mkv'
+                        )
 
-                        self._run_ffmpeg_process(cmd, show_progress=False)
-                        successful_dumps += 1
+                        progress.setLabelText(
+                            f"Processing title {title_idx}/{total_titles} - Angle {angle}/{angle_count}"
+                        )
 
-                    except Exception as e:
-                        error(f'Failed to dump title {title_idx} angle {angle}: {e}\n{format_exc()}')
-                        failed_dumps.append(f"{title_idx} (angle {angle})")
+                        debug(f'Dumping title {title_idx} angle {angle} to {output_path}')
 
-            progress.setValue(title_count)
+                        try:
+                            self._dump_title(title_idx, str(output_path), angle)
+                        except RuntimeError as e:
+                            warning(f'Failed to dump title {title_idx} angle {angle}: {str(e)}')
+                            continue
 
-            if successful_dumps > 0:
-                summary = f"Successfully dumped {successful_dumps} titles to: {output_dir}"
+                except RuntimeError as e:
+                    warning(f'Failed to dump title {title_idx}: {str(e)}')
+                    continue
+                except Exception as e:
+                    error(f'Unexpected error dumping title {title_idx}: {str(e)}\n{format_exc()}')
+                    continue
 
-                if failed_dumps:
-                    summary += f"\n\nFailed to dump titles: {', '.join(map(str, failed_dumps))}"
+                titles_processed += 1
+                progress.setValue(titles_processed)
+                QApplication.processEvents()
 
-                QMessageBox.information(self.parent, "Dump Complete", summary)
-            else:
-                QMessageBox.critical(self.parent, "Error", "Failed to dump any titles!")
-
-        except Exception as e:
-            error(f'Failed to dump all titles: {e}\n{format_exc()}')
-            QMessageBox.critical(self.parent, "Error", f"Failed to dump all titles: {str(e)}")
         finally:
             progress.close()
 
     def dump_title(self) -> None:
-        """Dump video and all audio tracks to file using ffmpeg."""
+        """Dump currently selected title."""
 
         debug('Dumping title')
 
-        if not self._check_ffmpeg_support():
-            error('FFmpeg support check failed')
+        if not self._check_ffmpeg():
             return
 
-        if not self.parent.iso_path:
-            error('No ISO file loaded')
-            return
+        selected_item = self.parent.tree_manager.tree.currentItem()
+        data = selected_item.data(0, Qt.ItemDataRole.UserRole)
 
-        if not self.parent.current_title:
-            error('No title selected')
-            return
+        title_idx = data['title']
+        angle = data.get('angle')
+        title_info = self.parent.title_info.get((title_idx, angle), {})
 
-        title_idx = self.parent.current_title._title + 1
-        angle = getattr(self.parent.current_title, 'angle', 1)
         debug(f'Dumping title {title_idx} (angle {angle})')
 
-        # Try both with and without angle if lookup fails
-        title_key = (title_idx, angle)
-        if title_key not in self.parent.title_info:
-            title_key = (title_idx, None)
+        # Get save path
+        debug('Getting save path for title dump')
+        suggested_name = self._get_suggested_filename(title_idx, title_info)
+        debug(f'Suggested filename: {suggested_name}')
 
-            if title_key not in self.parent.title_info:
-                error(
-                    f'Title info lookup failed:\n'
-                    f'Title key: {title_key}\n'
-                    f'Title info keys: {list(self.parent.title_info.keys())}\n'
-                    f'Title number: {title_idx}\n'
-                    f'Title angle: {angle}'
-                )
-
-                QMessageBox.critical(self.parent, "Error", "Title information not found!")
-
-                return
-
-        output_path = self._get_save_path()
+        output_path = self._get_save_path(suggested_name)
 
         if not output_path:
             debug('User cancelled save dialog')
             return
 
-        cmd = self._build_ffmpeg_command(self.parent.iso_path.to_str(), output_path)
-        debug(f'FFmpeg command built: {" ".join(cmd)}')
+        self._dump_title(title_idx, output_path, angle)
 
-        self._run_ffmpeg_process(cmd)
-
-    def _check_ffmpeg_support(self) -> bool:
+    def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available and supports DVD video."""
         debug('Checking FFmpeg installation and DVD video support')
 
@@ -185,17 +172,49 @@ class FFmpegHandler:
 
         return True
 
-    def _get_title_filename(self, title_idx: int, angle: int | None) -> str:
-        """Generate filename for a title."""
+    def _get_suggested_filename(self, title_idx: int, title_info: dict[str, Any] | int) -> str:
+        """Get suggested filename for title dump."""
 
-        name = f"{self.parent.iso_path.stem}_title_{title_idx:02d}"
+        # Normalize title_info and angle
+        if isinstance(title_info, int):
+            angle = title_info
+            title_info = (
+                self.parent.title_info.get((title_idx, angle)) or
+                self.parent.title_info.get((title_idx, None), {})
+            )
+            if angle is not None and title_info:
+                title_info = {**title_info, 'angle': angle}
+        else:
+            angle = title_info.get('angle', 1)  # Default to angle 1 if not specified
 
-        if angle is not None:
-            name += f"_angle_{angle:02d}"
+        # Build filename components
+        base_name = self.parent.iso_path.stem
+        title_str = f"title_{title_idx:02d}"
 
-        return name + ".mkv"
+        angle_str = ""
+        chapter_str = ""
 
-    def _get_save_path(self) -> str | None:
+        # Add angle if title has multiple angles
+        has_multiple_angles = title_info.get('angle_count', 1) > 1
+
+        if has_multiple_angles:
+            print('xxxxxxxxxxxxxxxxxxxxx', angle)
+            angle_str = f"_angle_{angle:02d}"
+
+        # Add chapter range if not using full range
+        if hasattr(self, 'chapter_start') and hasattr(self, 'chapter_end'):
+            chapter_count = title_info.get('chapter_count', 1)
+
+            if not (self.chapter_start == 1 and self.chapter_end == chapter_count):
+                chapter_str = (
+                    f"_ch{self.chapter_start:02d}"
+                    if self.chapter_start == self.chapter_end
+                    else f"_ch{self.chapter_start:02d}-{self.chapter_end:02d}"
+                )
+
+        return f"{base_name}_{title_str}{angle_str}{chapter_str}.mkv"
+
+    def _get_save_path(self, filename: str = '') -> str | None:
         """Get the save path for the video/audio output."""
 
         debug('Getting save path for title dump')
@@ -218,7 +237,7 @@ class FFmpegHandler:
                 QMessageBox.critical(self.parent, "Error", "Title information not found!")
                 return
 
-        suggested_name = self._get_title_filename(title_idx, angle)
+        suggested_name = filename or self._get_suggested_filename(title_idx, angle)
         debug(f'Suggested filename: {suggested_name}')
 
         output_path, _ = QFileDialog.getSaveFileName(
@@ -233,31 +252,61 @@ class FFmpegHandler:
 
         return output_path
 
-    def _build_ffmpeg_command(self, file_path: str, output_path: str, angle: int | None) -> List[str]:
+    def _build_ffmpeg_command(self, file_path: str, output_path: str | SPath, angle: int | None, title_idx: int | None = None) -> list[str]:
         """Build the ffmpeg command for video and all audio extraction."""
 
-        title_idx = self.parent.current_title._title + 1
+        if title_idx is None:
+            title_idx = self.parent.current_title._title + 1
+
+        # Try both with and without angle for title info lookup
+        title_key = (title_idx, angle)
+        title_info = self.parent.title_info.get(title_key, {})
+
+        if not title_info:
+            title_key = (title_idx, None)
+            title_info = self.parent.title_info.get(title_key, {})
+
+        debug(f'Building FFmpeg command for title_key={title_key}')
+        debug(f'Title info: {title_info}')
 
         cmd = [
             'ffmpeg', '-hide_banner',
             '-f', 'dvdvideo',
             '-preindex', 'True',
-            '-title', str(title_idx)
         ]
+
+        # Add chapter trimming parameters if available and needed
+        if 'chapters' in title_info:
+            chapter_count = title_info.get('chapter_count', 0)
+
+            # Only add chapter_start if it's not the first chapter
+            if self.chapter_start is not None:
+                if self.chapter_start > 1:
+                    debug(f'Adding chapter start: {self.chapter_start}')
+                    cmd.extend(['-chapter_start', str(self.chapter_start)])
+
+            # Only add chapter_end if it's not the last chapter
+            if self.chapter_end is not None:
+                if self.chapter_end < chapter_count:
+                    debug(f'Adding chapter end: {self.chapter_end}')
+                    cmd.extend(['-chapter_end', str(self.chapter_end)])
+        else:
+            debug('No chapters available in title info')
+
+        cmd.extend(['-title', str(title_idx)])
 
         if angle is not None:
             cmd.extend(['-angle', str(angle)])
 
-        cmd.extend(['-i', file_path])
+        # Properly quote the input path
+        quoted_input = f'"{file_path}"'
+        cmd.extend(['-i', quoted_input])
 
-        # Add video stream
         cmd.extend([
             '-map', '0:v:0',
             '-c:v', 'copy'
         ])
 
-        # Try both with and without angle for title info lookup
-        title_key = (title_idx, angle)
         if title_key not in self.parent.title_info:
             title_key = (title_idx, None)
             if title_key not in self.parent.title_info:
@@ -284,101 +333,63 @@ class FFmpegHandler:
                     f'-metadata:s:a:{idx}', f'title=Audio Track {idx+1} ({lang_info.upper()})'
                 ])
 
-        cmd.append(output_path)
+        # Properly quote the output path
+        if isinstance(output_path, SPath):
+            output_path = str(output_path)
+
+        quoted_output = f'"{output_path}"'
+        cmd.append(quoted_output)
         return cmd
 
-    def _run_ffmpeg_process(self, cmd: List[str], show_progress: bool = True) -> None:
-        """Run the ffmpeg process with progress dialog."""
+    def _run_ffmpeg_process(self, cmd: list[str]) -> None:
+        """Run FFmpeg process and handle output."""
 
-        if (output_file := SPath(cmd[-1])).exists():
-            debug(f'Deleting existing output file: {output_file}')
-            output_file.unlink(missing_ok=True)
+        # Get input and output paths from command
+        input_idx = cmd.index('-i') + 1
+        input_path = cmd[input_idx].strip('"')
+        output_path = cmd[-1].strip('"')
 
-        progress = None
+        # Delete output file if it exists (ffmpeg will hang if it's there, even with -y)
+        if SPath(output_path).exists():
+            debug(f'Deleting existing output file: {output_path}')
+            SPath(output_path).unlink()
 
-        if show_progress:
-            progress = QProgressDialog("Starting dump process...", "Cancel", 0, 100, self.parent)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setWindowTitle("FFmpeg Progress")
-            progress.show()
+        # Properly escape paths for subprocess
+        cmd[input_idx] = SPath(input_path).as_posix()
+        cmd[-1] = SPath(output_path).as_posix()
 
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1
-            )
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
 
-            duration = None
-            time = 0
+        error_output = ''
 
-            while process.poll() is None:
-                if progress and progress.wasCanceled():
-                    debug('User cancelled FFmpeg process')
-                    process.terminate()
-                    process.wait()
-                    break
+        while True:
+            output = process.stderr.readline()
+            if output == '' and process.poll() is not None:
+                break
 
-                if not process.stderr:
-                    QApplication.processEvents()
-                    continue
+            if output:
+                error_output += output
 
-                line = process.stderr.readline()
+                if 'time=' in output:
+                    if self.log_level == DEBUG:
+                        print(output.strip())
 
-                if self.log_level <= DEBUG:
-                    print(line, end='')
+        if process.returncode != 0:
+            if 'looks empty (may consist of padding cells)' in error_output:
+                warning('Skipping empty title (padding cells)')
+                return
 
-                if 'already exists. Overwrite?' in line:
-                    process.stdin.write('y\n')
-                    process.stdin.flush()
-                    continue
+            error(f'FFmpeg process failed:\n{error_output}')
+            raise RuntimeError(f"Failed to dump titles:\n\n{error_output}")
 
-                if not progress:
-                    continue
+    def _dump_title(self, title_idx: int, output_path: str, angle: int | None = None) -> None:
+        """Dump a single title."""
 
-                if 'Duration:' in line and not duration:
-                    try:
-                        duration_str = line.split('Duration: ')[1].split(',')[0]
-                        h, m, s = map(float, duration_str.split(':'))
-                        duration = h * 3600 + m * 60 + s
-                    except Exception as e:
-                        error(f'Failed to parse duration: {e}\n{format_exc()}')
-                    continue
+        cmd = self._build_ffmpeg_command(self.parent.iso_path.to_str(), output_path, angle, title_idx)
 
-                if 'time=' not in line:
-                    continue
-
-                try:
-                    time_str = line.split('time=')[1].split()[0]
-                    h, m, s = map(float, time_str.split(':'))
-                    time = h * 3600 + m * 60 + s
-
-                    if duration:
-                        progress.setValue(int(time / duration * 100))
-                        progress.setLabelText(f"Time: {time_str} / {duration_str}")
-                except Exception as e:
-                    error(f'Failed to parse time: {e}\n{format_exc()}')
-
-                QApplication.processEvents()
-
-            if process.returncode != 0:
-                error_output = process.stderr.read() if process.stderr else "Unknown error"
-                if 'ffmpeg version' in error_output:
-                    error_output = '\n'.join(
-                        line for line in error_output.splitlines()
-                        if not line.startswith('  ')
-                        and 'ffmpeg version' not in line
-                        and 'configuration:' not in line
-                        and 'lib' not in line
-                    )
-                error(f'FFmpeg process failed: {error_output}')
-                raise RuntimeError(f"Failed to dump titles:\n\n{error_output}")
-
-        except Exception as e:
-            error(f'Failed to dump titles: {e}\n{format_exc()}')
-            raise
-        finally:
-            if progress:
-                progress.close()
+        self._run_ffmpeg_process(cmd)

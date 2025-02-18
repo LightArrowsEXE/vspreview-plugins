@@ -25,7 +25,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
     __slots__ = (
         'file_label', 'load_button', 'info_label', 'dump_title_button', 'tree_manager', 'ffmpeg_handler',
-        'copy_script_button'
+        'copy_script_button', 'chapter_start_spin', 'chapter_end_spin'
     )
 
     def __init__(self, plugin: AbstractPlugin) -> None:
@@ -55,11 +55,15 @@ class IsoBrowserTab(AbstractSettingsWidget):
         create_widgets(self)
         setup_layout(self)
 
+        # Connect chapter spinbox signals
+        self.chapter_start_spin.valueChanged.connect(self._on_chapter_range_changed)
+        self.chapter_end_spin.valueChanged.connect(self._on_chapter_range_changed)
+
     def _on_load_iso(self) -> None:
         """Handle ISO file loading."""
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select ISO file", "", "ISO files (*.iso);;All files (*.*)"
+            self, "Select ISO/IFO file", "", "DVD files (*.iso *.ifo);;All files (*.*)"
         )
 
         if not file_path:
@@ -71,21 +75,26 @@ class IsoBrowserTab(AbstractSettingsWidget):
             self.iso_path = SPath(file_path)
 
             # Create progress dialog
-            progress = QProgressDialog("Loading ISO file...", "Cancel", 0, 100, self)
+            suffix = self.iso_path.suffix.lower()
+            dialog_texts = dialog_text_map.get(suffix, dialog_text_map['.iso'])
+
+            progress = QProgressDialog(dialog_texts['loading'], "Cancel", 0, 100, self)
             progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setWindowTitle("Loading ISO")
+            progress.setWindowTitle(dialog_texts['loading'])
             progress.setValue(0)
             progress.show()
 
             QApplication.processEvents()
+            progress.setLabelText(dialog_texts['opening'])
 
-            progress.setLabelText("Parsing ISO structure...")
-            self.iso_file = IsoFile(self.iso_path)
+            # For IFO files, use the DVD root directory (2 levels up)
+            # For ISO files, use the ISO file path directly
+            self.iso_file = IsoFile(self.iso_path.parent.parent if suffix == '.ifo' else self.iso_path)
 
             if progress.wasCanceled():
                 raise Exception("Operation cancelled by user")
 
-            progress.setLabelText("Loading titles...")
+            progress.setLabelText(dialog_texts['loading'])
             self.file_label.setText(self.iso_path.name)
             self.info_label.setText("Select a title to view details")
 
@@ -111,7 +120,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
                 if progress.wasCanceled():
                     raise Exception("Operation cancelled by user")
 
-                progress.setLabelText(f"Loading title {title_idx} of {total_titles}...")
+                progress.setLabelText(f"Loading title {title_idx}/{total_titles}...")
 
                 try:
                     self.tree_manager._add_title_to_tree(title_idx)
@@ -119,8 +128,15 @@ class IsoBrowserTab(AbstractSettingsWidget):
                     error(f'Failed to add title {title_idx}: {e}\n{format_exc()}')
                     continue
 
-                items_processed += 1
-                progress.setValue(min(int(items_processed * progress_per_item), 100))
+                # Account for angles in progress calculation
+                tt_srpt = self.iso_file.ifo0.tt_srpt[title_idx - 1]
+                angle_count = max(1, tt_srpt.nr_of_angles)
+
+                for angle in range(angle_count):
+                    items_processed += 1
+                    progress.setLabelText(f"Loading title {title_idx}/{total_titles} angle {angle + 1}/{angle_count}...")
+                    progress.setValue(min(int(items_processed * progress_per_item), 100))
+                    QApplication.processEvents()
 
             # Finish up
             self.tree_manager.tree.expandAll()
@@ -128,9 +144,9 @@ class IsoBrowserTab(AbstractSettingsWidget):
             progress.setValue(100)
 
         except Exception as e:
-            error(f'Failed to load ISO: {e}\n{format_exc()}')
+            error(f'{dialog_texts["error"]}: {e}\n{format_exc()}')
             self._reset_iso_state()
-            QMessageBox.critical(self, "Error", f"Failed to load ISO: {str(e)}")
+            QMessageBox.critical(self, "Error", f"{dialog_texts['error']}: {str(e)}")
         finally:
             if 'progress' in locals():
                 progress.close()
@@ -149,11 +165,19 @@ class IsoBrowserTab(AbstractSettingsWidget):
         title_num = data['title']
         angle = data.get('angle')
 
-        debug(f'Copying script for title {title_num} ({angle=})')
+        debug(f'Copying code snippet for title {title_num} ({angle=}) to clipboard')
+
+        iso_path = self.iso_path.parent.parent if self.iso_path.suffix == '.ifo' else self.iso_path
+        iso_path = iso_path.as_posix().replace('"', '\\"').replace("'", "\\'")
 
         script = "from vssource import IsoFile\n\n"
-        script += f"iso = IsoFile(\"{self.iso_path.as_posix().replace('"', '\\"').replace('\'', '\\\'')}\")\n"
-        script += f"src = iso.get_title({title_num}" + (f", angle={angle}" if angle is not None else "") + ")"
+        script += f"iso = IsoFile(\"{iso_path}\")\n"
+        script += f"src = iso.get_title({title_num}"
+
+        if angle is not None:
+            script += f", angle={angle}"
+
+        script += ")"
 
         QApplication.clipboard().setText(script)
         self.plugin.main.show_message("IsoFile code snippet copied to clipboard!")
@@ -163,7 +187,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         debug('Resetting ISO state')
 
-        self.file_label.setText("No ISO loaded")
+        self.file_label.setText("No DVD loaded")
         self._init_state()
         self.tree_manager.clear()
         self.dump_title_button.setEnabled(False)
@@ -219,6 +243,14 @@ class IsoBrowserTab(AbstractSettingsWidget):
             debug(f'Failed to update frame in on_current_output_changed: {e}\n{format_exc()}')
             pass
 
+    def _on_chapter_range_changed(self) -> None:
+        """Handle chapter range spinbox value changes."""
+        if not self._check_current_title():
+            return
+
+        self.ffmpeg_handler.chapter_start = self.chapter_start_spin.value()
+        self.ffmpeg_handler.chapter_end = self.chapter_end_spin.value()
+
     def __getstate__(self) -> dict[str, Any]:
         """Get state for serialization."""
 
@@ -234,17 +266,42 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         if not (iso_path := SPath(iso_path)).exists():
             debug(f'Previously saved ISO file no longer exists: {iso_path}')
-
             return
 
         try:
             debug(f'Loading saved ISO state: {iso_path}')
 
+            file_ext = iso_path.suffix.lower()
+            dialog_texts = dialog_text_map.get(file_ext, dialog_text_map['.iso'])
+
+            progress_dialog = QProgressDialog(dialog_texts['opening'], None, 0, 0, self)
+            progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.show()
+
             self.iso_path = iso_path
             self.iso_file = IsoFile(self.iso_path)
+
+            progress_dialog.setLabelText(dialog_texts['loading'])
             self.file_label.setText(self.iso_path.name)
             self.tree_manager.populate_tree()
+
+            progress_dialog.close()
         except Exception as e:
-            error(f'Failed to load saved ISO state: {e}\n{format_exc()}')
+            error(f'Failed to load saved {file_ext.upper()} state: {e}\n{format_exc()}')
             self._reset_iso_state()
-            QMessageBox.critical(self, "Error", f"Failed to load ISO: {str(e)}")
+            QMessageBox.critical(self, "Error", f"{dialog_texts['error']}: {str(e)}")
+
+
+dialog_text_map = {
+    '.iso': {
+        'opening': "Opening ISO file...",
+        'loading': "Loading titles from ISO...",
+        'error': "Failed to load ISO file"
+    },
+    '.ifo': {
+        'opening': "Opening IFO file...",
+        'loading': "Loading titles from DVD structure...",
+        'error': "Failed to load IFO file"
+    }
+}
