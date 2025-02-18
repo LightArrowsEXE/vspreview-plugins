@@ -11,19 +11,21 @@ Supports everything `vssource.IsoFile` supports.
 
 - Load ISO files
 - Navigate through titles
-- View title properties
-- Dump audio tracks to WAV/AC3 files
+- Navigation through angles
+- View title metadata
+- View chapter metadata
+- Dump titles to files
+- Dump angles to files
+- Dump all titles/angles to files at once
 - Output video node
 
 ### Planned
 
-- Navigation through angles
+- Splitting by chapters
 - Navigation to chapters
-- Output audio nodes
-- Select audio nodes to dump via the audio track list
+- Preview audio nodes
 - Copy button for an IsoFile code snippet for users to put in their scripts
 - Implement some way to open vspreview without having to pre-load a video node
-- Dump audio tracks to DTS files
 
 ## SAR Helper
 
