@@ -4,12 +4,10 @@ from logging import debug, error
 from traceback import format_exc
 from typing import Any
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox, QWidget, QHBoxLayout, QProgressDialog
-from PyQt6.QtGui import QDesktopServices, QClipboard
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QProgressDialog
 from vspreview.core import Frame
-from vspreview.core.abstracts import AbstractSettingsWidget, PushButton
+from vspreview.core.abstracts import AbstractSettingsWidget
 from vspreview.plugins import AbstractPlugin
 from vssource import IsoFile, Title
 from vstools import SPath, vs
