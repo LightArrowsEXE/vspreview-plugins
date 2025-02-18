@@ -140,7 +140,10 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
             # Finish up
             self.tree_manager.tree.expandAll()
-            self.dump_all_titles_button.setEnabled(total_titles > 0)
+
+            if not self.iso_path.suffix.lower() == '.ifo':
+                self.dump_all_titles_button.setEnabled(total_titles > 0)
+
             progress.setValue(100)
 
         except Exception as e:
