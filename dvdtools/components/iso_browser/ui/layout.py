@@ -15,6 +15,7 @@ def setup_layout(parent: QWidget) -> None:
     file_layout.addWidget(parent.load_button)
     file_layout.addWidget(parent.dump_title_button)
     file_layout.addWidget(parent.dump_all_titles_button)
+    file_layout.addWidget(parent.copy_script_button)
     file_layout.addWidget(parent.info_button)
 
     parent.vlayout.addWidget(file_widget)

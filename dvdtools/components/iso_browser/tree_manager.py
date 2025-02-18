@@ -213,6 +213,7 @@ class ISOTreeManager:
         try:
             debug(f'Loading title {title_idx} ({angle=})')
             self._load_selected_title(title_idx, angle)
+            self.parent.copy_script_button.setEnabled(True)
         except Exception as e:
             error(f'Failed to load title: {e}\n{format_exc()}')
             raise

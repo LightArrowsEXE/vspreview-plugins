@@ -76,7 +76,7 @@ class FFmpegHandler:
                             debug(f'Deleting existing file: {output_path}')
                             output_path.unlink()
 
-                        cmd = self._build_ffmpeg_command(str(self.parent.iso_path), str(output_path), angle)
+                        cmd = self._build_ffmpeg_command(self.parent.iso_path.to_str(), output_path.to_str(), angle)
                         debug(f'FFmpeg command built for title {title_idx}/{angle_count} angle {angle}/{angle_count}: {" ".join(cmd)}')
 
                         self._run_ffmpeg_process(cmd, show_progress=False)
@@ -149,7 +149,7 @@ class FFmpegHandler:
             debug('User cancelled save dialog')
             return
 
-        cmd = self._build_ffmpeg_command(str(self.parent.iso_path), output_path)
+        cmd = self._build_ffmpeg_command(self.parent.iso_path.to_str(), output_path)
         debug(f'FFmpeg command built: {" ".join(cmd)}')
 
         self._run_ffmpeg_process(cmd)

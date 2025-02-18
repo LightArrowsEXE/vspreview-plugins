@@ -6,7 +6,8 @@ from typing import Any
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox, QWidget, QHBoxLayout, QProgressDialog
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QClipboard
+from PyQt6.QtCore import QTimer
 from vspreview.core import Frame
 from vspreview.core.abstracts import AbstractSettingsWidget, PushButton
 from vspreview.plugins import AbstractPlugin
@@ -23,7 +24,8 @@ class IsoBrowserTab(AbstractSettingsWidget):
     """Tab for browsing DVD/BD ISO files and their titles/angles."""
 
     __slots__ = (
-        'file_label', 'load_button', 'info_label', 'dump_title_button', 'tree_manager', 'ffmpeg_handler'
+        'file_label', 'load_button', 'info_label', 'dump_title_button', 'tree_manager', 'ffmpeg_handler',
+        'copy_script_button'
     )
 
     def __init__(self, plugin: AbstractPlugin) -> None:
@@ -109,7 +111,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
                 if progress.wasCanceled():
                     raise Exception("Operation cancelled by user")
 
-                progress.setLabelText(f"Loading title {title_idx + 1} of {total_titles}...")
+                progress.setLabelText(f"Loading title {title_idx} of {total_titles}...")
 
                 try:
                     self.tree_manager._add_title_to_tree(title_idx)
@@ -133,6 +135,29 @@ class IsoBrowserTab(AbstractSettingsWidget):
             if 'progress' in locals():
                 progress.close()
 
+    def _on_copy_script(self) -> None:
+        """Copy an IsoFile script snippet to clipboard."""
+
+        if not self.iso_path:
+            return
+
+        selected_item = self.tree_manager.tree.currentItem()
+
+        if not selected_item or not (data := selected_item.data(0, Qt.ItemDataRole.UserRole)):
+            return
+
+        title_num = data['title']
+        angle = data.get('angle')
+
+        debug(f'Copying script for title {title_num} ({angle=})')
+
+        script = "from vssource import IsoFile\n\n"
+        script += f"iso = IsoFile(\"{self.iso_path.as_posix().replace('"', '\\"').replace('\'', '\\\'')}\")\n"
+        script += f"src = iso.get_title({title_num}" + (f", angle={angle}" if angle is not None else "") + ")"
+
+        QApplication.clipboard().setText(script)
+        self.plugin.main.show_message("IsoFile code snippet copied to clipboard!")
+
     def _reset_iso_state(self) -> None:
         """Reset the ISO state and UI elements."""
 
@@ -143,6 +168,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
         self.tree_manager.clear()
         self.dump_title_button.setEnabled(False)
         self.dump_all_titles_button.setEnabled(False)
+        self.copy_script_button.setEnabled(False)
         self.info_label.setText("Select a title to view details")
 
     def _check_current_title(self) -> bool:
