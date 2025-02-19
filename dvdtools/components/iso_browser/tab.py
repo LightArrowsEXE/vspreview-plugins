@@ -173,20 +173,44 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         debug(debug_mapping['copying_snippet'].format(title_num, angle))
 
-        iso_path = self.iso_path.parent.parent if self.iso_path.suffix == '.ifo' else self.iso_path
-        iso_path = iso_path.as_posix().replace('"', '\\"').replace("'", "\\'")
-
-        script = 'from vssource import IsoFile\n\n'
-        script += f'iso = IsoFile(\"{iso_path}\")\n'
-        script += f'src = iso.get_title({title_num}'
-
-        if angle is not None:
-            script += f', angle={angle}'
-
-        script += ')'
+        script = self._generate_script(title_num, angle)
 
         QApplication.clipboard().setText(script)
         self.plugin.main.show_message(debug_mapping['snippet_copied'])
+
+    def _generate_script(self, title_num: int, angle: int | None) -> str:
+        """Generate a VapourSynth script for the given title and angle, as well as other relevant methods."""
+
+        iso_path = self.iso_path.parent.parent if self.iso_path.suffix == '.ifo' else self.iso_path
+        iso_path = iso_path.as_posix().replace('"', '\\"').replace("'", "\\'")
+
+        # Build core code snippet
+        script = [
+            'from vssource import IsoFile', '',
+            f'iso = IsoFile(\"{iso_path}\")',
+        ]
+
+        title_args = [str(title_num)]
+
+        if angle is not None:
+            title_args += [f'angle={angle}']
+
+        script += [f'title = iso.get_title({", ".join(title_args)})']
+
+        # Add chapter splitting if needed
+        start_chapter = self.chapter_start_spin.value()
+        end_chapter = self.chapter_end_spin.value()
+
+        title_info = self.title_info.get((title_num, angle), {})
+        chapter_count = title_info.get('chapter_count', end_chapter)
+
+        if start_chapter > 1 or end_chapter < chapter_count:
+            script += [f'title = title.split_range({start_chapter}, {end_chapter})']
+
+        # Assign video node
+        script += ['', 'src = title.video']
+
+        return '\n'.join(script)
 
     def _reset_iso_state(self) -> None:
         """Reset the ISO state and UI elements."""
