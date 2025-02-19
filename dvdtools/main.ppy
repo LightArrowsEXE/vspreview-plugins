@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QTabWidget
 
 from vspreview.main import MainWindow
-from vspreview.plugins import AbstractPlugin, PluginConfig, MappedNodesViewPlugin
+from vspreview.plugins import AbstractPlugin, PluginConfig
 
 from .components.iso_browser.tab import IsoBrowserTab
 # from .tabs.sar_tools import SarToolsTab

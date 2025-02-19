@@ -31,7 +31,7 @@ class FFmpegHandler:
 
         # Get save directory
         save_dir = QFileDialog.getExistingDirectory(
-            self.parent, "Select output directory", str(self.parent.iso_path.parent)
+            self.parent, 'Select output directory', str(self.parent.iso_path.parent)
         )
 
         if not save_dir:
@@ -47,12 +47,12 @@ class FFmpegHandler:
                 unique_titles[title_idx] = info
 
         total_titles = len(unique_titles)
-        debug(f'Found {total_titles} unique titles')
+        debug(debug_mapping['unique_titles_found'].format(total_titles))
 
         # Create progress dialog
-        progress = QProgressDialog("Dumping titles...", "Cancel", 0, total_titles, self.parent)
+        progress = QProgressDialog('Dumping titles...', 'Cancel', 0, total_titles, self.parent)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setWindowTitle("Dumping Titles")
+        progress.setWindowTitle('Dumping Titles')
 
         titles_processed = 0
 
@@ -67,14 +67,14 @@ class FFmpegHandler:
                 self.chapter_end = chapter_count
 
                 angle_count = info.get('angle_count', 1)
-                debug(f'Processing title {title_idx} with {angle_count} angles')
+                debug(debug_mapping['processing_title_angles'].format(title_idx, angle_count))
 
                 try:
                     output_path = save_dir / self._get_suggested_filename(title_idx, info)
 
                     if angle_count == 1:
-                        progress.setLabelText(f"Processing title {title_idx}/{total_titles}")
-                        debug(f'Dumping title {title_idx} to {output_path}')
+                        progress.setLabelText(f'Processing title {title_idx}/{total_titles}')
+                        debug(debug_mapping['dumping_title'].format(title_idx, output_path))
                         self._dump_title(title_idx, str(output_path))
                         continue
 
@@ -87,22 +87,22 @@ class FFmpegHandler:
                         )
 
                         progress.setLabelText(
-                            f"Processing title {title_idx}/{total_titles} - Angle {angle}/{angle_count}"
+                            f'Processing title {title_idx}/{total_titles} - Angle {angle}/{angle_count}'
                         )
 
-                        debug(f'Dumping title {title_idx} angle {angle} to {output_path}')
+                        debug(debug_mapping['dumping_title_angle'].format(title_idx, angle, output_path))
 
                         try:
                             self._dump_title(title_idx, str(output_path), angle)
                         except RuntimeError as e:
-                            warning(f'Failed to dump title {title_idx} angle {angle}: {str(e)}')
+                            warning(error_mapping['dump_title_angle_failed'].format(title_idx, angle, str(e)))
                             continue
 
                 except RuntimeError as e:
-                    warning(f'Failed to dump title {title_idx}: {str(e)}')
+                    warning(error_mapping['dump_title_failed'].format(title_idx, str(e)))
                     continue
                 except Exception as e:
-                    error(f'Unexpected error dumping title {title_idx}: {str(e)}\n{format_exc()}')
+                    error(error_mapping['unexpected_dump_error'].format(title_idx, str(e), format_exc()))
                     continue
 
                 titles_processed += 1
@@ -115,7 +115,7 @@ class FFmpegHandler:
     def dump_title(self) -> None:
         """Dump currently selected title."""
 
-        debug('Dumping title')
+        debug(debug_mapping['dumping_title_start'])
 
         if not self._check_ffmpeg():
             return
@@ -127,24 +127,25 @@ class FFmpegHandler:
         angle = data.get('angle')
         title_info = self.parent.title_info.get((title_idx, angle), {})
 
-        debug(f'Dumping title {title_idx} (angle {angle})')
+        debug(debug_mapping['dumping_title_angle_info'].format(title_idx, angle))
 
         # Get save path
-        debug('Getting save path for title dump')
+        debug(debug_mapping['getting_save_path'])
         suggested_name = self._get_suggested_filename(title_idx, title_info)
-        debug(f'Suggested filename: {suggested_name}')
+        debug(debug_mapping['suggested_filename'].format(suggested_name))
 
         output_path = self._get_save_path(suggested_name)
 
         if not output_path:
-            debug('User cancelled save dialog')
+            debug(debug_mapping['save_dialog_cancelled'])
             return
 
         self._dump_title(title_idx, output_path, angle)
 
     def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available and supports DVD video."""
-        debug('Checking FFmpeg installation and DVD video support')
+
+        debug(debug_mapping['checking_ffmpeg'])
 
         try:
             result = subprocess.run(
@@ -152,21 +153,19 @@ class FFmpegHandler:
                 capture_output=True, text=True, check=True
             )
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            error(f'FFmpeg check failed: {e}\n{format_exc()}')
+            error(error_mapping['ffmpeg_check_failed'].format(e, format_exc()))
             QMessageBox.critical(
-                self.parent, "Error",
-                "FFmpeg not found. Please install FFmpeg and make sure it's in your PATH."
+                self.parent, 'Error',
+                error_mapping['ffmpeg_not_found']
             )
 
             return False
 
         if 'dvdvideo' not in result.stdout:
-            error('FFmpeg installation does not support DVD video demuxing!')
+            error(error_mapping['ffmpeg_no_dvd_support'])
             QMessageBox.critical(
-                self.parent, "Error",
-                "FFmpeg installation does not support DVD video demuxing. "
-                "Please ensure FFmpeg was built with GPL library support "
-                "and the configure switches --enable-libdvdnav and --enable-libdvdread."
+                self.parent, 'Error',
+                error_mapping['ffmpeg_no_dvd_support_msg']
             )
 
             return False
@@ -190,17 +189,16 @@ class FFmpegHandler:
 
         # Build filename components
         base_name = self.parent.iso_path.stem
-        title_str = f"title_{title_idx:02d}"
+        title_str = f'title_{title_idx:02d}'
 
-        angle_str = ""
-        chapter_str = ""
+        angle_str = ''
+        chapter_str = ''
 
         # Add angle if title has multiple angles
         has_multiple_angles = title_info.get('angle_count', 1) > 1
 
         if has_multiple_angles:
-            print('xxxxxxxxxxxxxxxxxxxxx', angle)
-            angle_str = f"_angle_{angle:02d}"
+            angle_str = f'_angle_{angle:02d}'
 
         # Add chapter range if not using full range
         if hasattr(self, 'chapter_start') and hasattr(self, 'chapter_end'):
@@ -208,17 +206,17 @@ class FFmpegHandler:
 
             if not (self.chapter_start == 1 and self.chapter_end == chapter_count):
                 chapter_str = (
-                    f"_ch{self.chapter_start:02d}"
+                    f'_ch{self.chapter_start:02d}'
                     if self.chapter_start == self.chapter_end
-                    else f"_ch{self.chapter_start:02d}-{self.chapter_end:02d}"
+                    else f'_ch{self.chapter_start:02d}-{self.chapter_end:02d}'
                 )
 
-        return f"{base_name}_{title_str}{angle_str}{chapter_str}.mkv"
+        return f'{base_name}_{title_str}{angle_str}{chapter_str}.mkv'
 
     def _get_save_path(self, filename: str = '') -> str | None:
         """Get the save path for the video/audio output."""
 
-        debug('Getting save path for title dump')
+        debug(debug_mapping['getting_save_path'])
 
         title_idx = self.parent.current_title._title + 1
         angle = getattr(self.parent.current_title, 'angle', 1)
@@ -228,28 +226,24 @@ class FFmpegHandler:
             title_key = (title_idx, None)
 
             if title_key not in self.parent.title_info:
-                error(
-                    f'Title info lookup failed:\n'
-                    f'Title key: {title_key}\n'
-                    f'Title info keys: {list(self.parent.title_info.keys())}\n'
-                    f'Title number: {title_idx}\n'
-                    f'Title angle: {angle}'
-                )
-                QMessageBox.critical(self.parent, "Error", "Title information not found!")
+                error(error_mapping['title_info_lookup_failed'].format(
+                    title_key, list(self.parent.title_info.keys()), title_idx, angle
+                ))
+                QMessageBox.critical(self.parent, 'Error', error_mapping['title_info_not_found'])
                 return
 
         suggested_name = filename or self._get_suggested_filename(title_idx, angle)
-        debug(f'Suggested filename: {suggested_name}')
+        debug(debug_mapping['suggested_filename'].format(suggested_name))
 
         output_path, _ = QFileDialog.getSaveFileName(
             self.parent,
-            "Save Title",
+            'Save Title',
             str(self.parent.iso_path.parent / suggested_name),
-            "Matroska Video (*.mkv);;All files (*.*)"
+            'Matroska Video (*.mkv);;All files (*.*)'
         )
 
         if output_path:
-            debug(f'Selected output path: {output_path}')
+            debug(debug_mapping['selected_output_path'].format(output_path))
 
         return output_path
 
@@ -267,8 +261,8 @@ class FFmpegHandler:
             title_key = (title_idx, None)
             title_info = self.parent.title_info.get(title_key, {})
 
-        debug(f'Building FFmpeg command for title_key={title_key}')
-        debug(f'Title info: {title_info}')
+        debug(debug_mapping['building_ffmpeg_command'].format(title_key))
+        debug(debug_mapping['title_info'].format(title_info))
 
         cmd = [
             'ffmpeg', '-hide_banner',
@@ -283,16 +277,16 @@ class FFmpegHandler:
             # Only add chapter_start if it's not the first chapter
             if self.chapter_start is not None:
                 if self.chapter_start > 1:
-                    debug(f'Adding chapter start: {self.chapter_start}')
+                    debug(debug_mapping['adding_chapter_start'].format(self.chapter_start))
                     cmd.extend(['-chapter_start', str(self.chapter_start)])
 
             # Only add chapter_end if it's not the last chapter
             if self.chapter_end is not None:
                 if self.chapter_end < chapter_count:
-                    debug(f'Adding chapter end: {self.chapter_end}')
+                    debug(debug_mapping['adding_chapter_end'].format(self.chapter_end))
                     cmd.extend(['-chapter_end', str(self.chapter_end)])
         else:
-            debug('No chapters available in title info')
+            debug(debug_mapping['no_chapters'])
 
         cmd.extend(['-title', str(title_idx)])
 
@@ -311,7 +305,7 @@ class FFmpegHandler:
         if title_key not in self.parent.title_info:
             title_key = (title_idx, None)
             if title_key not in self.parent.title_info:
-                error(f'Title info not found for {title_key}')
+                error(error_mapping['title_info_not_found_key'].format(title_key))
                 return cmd
 
         title_info = self.parent.title_info[title_key]
@@ -321,14 +315,14 @@ class FFmpegHandler:
             cmd.extend(['-map', f'0:a:{idx}'])
 
             if 'pcm' in audio_info.lower():
-                warning(f'PCM audio detected for track {idx}, re-encoding to FLAC')
+                warning(debug_mapping['pcm_audio_detected'].format(idx))
                 cmd.extend([f'-c:a:{idx}', 'flac', '-compression_level', '8'])
             else:
-                debug(f'{audio_info} audio detected for track {idx}, copying stream')
+                debug(debug_mapping['audio_detected'].format(audio_info, idx))
                 cmd.extend([f'-c:a:{idx}', 'copy'])
 
             if lang_info := title_info.get('audio_langs', [])[idx] if 'audio_langs' in title_info else None:
-                debug(f'Setting language metadata for audio track {idx}: {lang_info}')
+                debug(debug_mapping['setting_language_metadata'].format(idx, lang_info))
                 cmd.extend([
                     f'-metadata:s:a:{idx}', f'language={lang_info}',
                     f'-metadata:s:a:{idx}', f'title=Audio Track {idx+1} ({lang_info.upper()})'
@@ -352,7 +346,7 @@ class FFmpegHandler:
 
         # Delete output file if it exists (ffmpeg will hang if it's there, even with -y)
         if SPath(output_path).exists():
-            debug(f'Deleting existing output file: {output_path}')
+            debug(debug_mapping['deleting_output'].format(output_path))
             SPath(output_path).unlink()
 
         # Properly escape paths for subprocess
@@ -382,32 +376,28 @@ class FFmpegHandler:
 
         if process.returncode != 0:
             if 'looks empty (may consist of padding cells)' in error_output:
-                warning('Skipping empty title (padding cells)')
+                warning(error_mapping['empty_title'])
                 return
 
             if 'Unrecognized option' in error_output:
-                error(
-                    'Unrecognized option in FFmpeg command. '
-                    'Please ensure FFmpeg was built with GPL library support '
-                    'and the configure switches --enable-libdvdnav and --enable-libdvdread.'
-                    f'\n\n{error_output}',
-                )
+                error(error_mapping['ffmpeg_unrecognized_option_full'].format(error_output))
 
                 QMessageBox.critical(
                     self.parent,
-                    'Unrecognized option in FFmpeg command!',
-                    'Please ensure FFmpeg was built with GPL library support '
-                    'and is configured with --enable-libdvdnav and --enable-libdvdread.'
-                    f'\n\n{error_output}',
+                    error_mapping['ffmpeg_unrecognized_option'],
+                    ' '.join([
+                        error_mapping['ffmpeg_unrecognized_option'],
+                        error_mapping['ffmpeg_build_without_gpl']
+                    ]) + f'\n\n{error_output}',
                 )
                 return
 
-            error(f'FFmpeg process failed:\n{error_output}')
+            error(error_mapping['ffmpeg_process_failed'].format(error_output))
 
             QMessageBox.critical(
                 self.parent,
                 'Failed to dump titles',
-                f'Failed to dump titles:\n\n{error_output}',
+                error_mapping['dump_titles_failed'].format(error_output),
             )
 
     def _dump_title(self, title_idx: int, output_path: str, angle: int | None = None) -> None:
@@ -416,3 +406,50 @@ class FFmpegHandler:
         cmd = self._build_ffmpeg_command(self.parent.iso_path.to_str(), output_path, angle, title_idx)
 
         self._run_ffmpeg_process(cmd)
+
+
+error_mapping: dict[str, str] = {
+    'ffmpeg_build_without_gpl':
+        'Please ensure FFmpeg was built with GPL library support '
+        'and is configured with --enable-libdvdnav and --enable-libdvdread '
+        'and is in your PATH.',
+    'ffmpeg_unrecognized_option': 'Unrecognized option in FFmpeg command!',
+    'ffmpeg_unrecognized_option_full': 'Unrecognized option in FFmpeg command!\n\n{}',
+    'ffmpeg_check_failed': 'FFmpeg check failed: {}\n{}',
+    'ffmpeg_not_found': 'FFmpeg not found. Please install FFmpeg and make sure it\'s in your PATH.',
+    'ffmpeg_no_dvd_support': 'FFmpeg installation does not support DVD video demuxing!',
+    'ffmpeg_no_dvd_support_msg': 'FFmpeg installation does not support DVD video demuxing. Please ensure FFmpeg was built with GPL library support.',
+    'title_info_lookup_failed': 'Title info lookup failed:\nTitle key: {}\nTitle info keys: {}\nTitle number: {}\nTitle angle: {}',
+    'title_info_not_found': 'Title information not found!',
+    'title_info_not_found_key': 'Title info not found for {}',
+    'empty_title': 'Skipping empty title (padding cells)',
+    'ffmpeg_process_failed': 'FFmpeg process failed:\n{}',
+    'dump_titles_failed': 'Failed to dump titles:\n\n{}',
+    'dump_title_failed': 'Failed to dump title {}: {}',
+    'dump_title_angle_failed': 'Failed to dump title {} angle {}: {}',
+    'unexpected_dump_error': 'Unexpected error dumping title {}: {}\n{}'
+}
+
+
+debug_mapping: dict[str, str] = {
+    'building_ffmpeg_command': 'Building FFmpeg command for title_key={}',
+    'title_info': 'Title info: {}',
+    'unique_titles_found': 'Found {} unique titles',
+    'processing_title_angles': 'Processing title {} with {} angles',
+    'dumping_title': 'Dumping title {} to {}',
+    'dumping_title_angle': 'Dumping title {} angle {} to {}',
+    'dumping_title_start': 'Dumping title',
+    'dumping_title_angle_info': 'Dumping title {} (angle {})',
+    'getting_save_path': 'Getting save path for title dump',
+    'suggested_filename': 'Suggested filename: {}',
+    'save_dialog_cancelled': 'User cancelled save dialog',
+    'checking_ffmpeg': 'Checking FFmpeg installation and DVD video support',
+    'selected_output_path': 'Selected output path: {}',
+    'adding_chapter_start': 'Adding chapter start: {}',
+    'adding_chapter_end': 'Adding chapter end: {}',
+    'no_chapters': 'No chapters available in title info',
+    'pcm_audio_detected': 'PCM audio detected for track {}, re-encoding to FLAC',
+    'audio_detected': '{} audio detected for track {}, copying stream',
+    'setting_language_metadata': 'Setting language metadata for audio track {}: {}',
+    'deleting_output': 'Deleting existing output file: {}'
+}
