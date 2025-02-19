@@ -164,6 +164,10 @@ class ISOTreeManager:
             self.parent.title_info[(title_idx, angle)] = title_info
 
             debug(debug_mapping['title_loaded'].format(title_idx, angle))
+
+            self.parent.chapter_start_spin.setValue(1)
+            self.parent.chapter_end_spin.setValue(title_info['chapter_count'])
+
             return title
 
         except Exception as e:

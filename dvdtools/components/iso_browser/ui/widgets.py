@@ -43,11 +43,11 @@ def create_widgets(parent) -> None:
     parent.info_label = QLabel('Select a title to view details')
 
     # Add chapter trimming widgets
-    parent.chapter_label = QLabel('Trim Chapters:')
+    parent.chapter_label = QLabel('Trim Chapters')
     parent.chapter_start_spin = QSpinBox()
     parent.chapter_to_label = QLabel('to')
     parent.chapter_end_spin = QSpinBox()
-    parent.chapter_dump_label = QLabel('when dumping this title')
+    parent.chapter_dump_label = QLabel('when dumping this title (inclusive)')
 
     # Configure spinboxes
     parent.chapter_start_spin.setMinimum(1)
