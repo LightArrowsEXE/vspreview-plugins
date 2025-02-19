@@ -1,11 +1,10 @@
 from logging import debug, error
 from traceback import format_exc
 from typing import Optional
-from vspreview import set_timecodes
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
-
+from vspreview import set_timecodes
 from vssource import Title
 
 __all__ = [

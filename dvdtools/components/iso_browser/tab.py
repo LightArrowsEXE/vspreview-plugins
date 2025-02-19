@@ -5,17 +5,18 @@ from traceback import format_exc
 from typing import Any
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QProgressDialog
+from PyQt6.QtWidgets import (QApplication, QFileDialog, QMessageBox,
+                             QProgressDialog)
 from vspreview.core import Frame
 from vspreview.core.abstracts import AbstractSettingsWidget
 from vspreview.plugins import AbstractPlugin
 from vssource import IsoFile, Title
 from vstools import SPath, vs
 
-from .tree_manager import ISOTreeManager
 from .ffmpeg_handler import FFmpegHandler
+from .tree_manager import ISOTreeManager
 from .types import TitleInfo
-from .ui import setup_layout, create_widgets
+from .ui import create_widgets, setup_layout
 
 
 class IsoBrowserTab(AbstractSettingsWidget):

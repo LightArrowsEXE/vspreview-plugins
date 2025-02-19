@@ -1,10 +1,11 @@
-from logging import warning, DEBUG, debug, error, getLogger
-from traceback import format_exc
 import subprocess
+from logging import DEBUG, debug, error, getLogger, warning
+from traceback import format_exc
 from typing import Any
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QProgressDialog
+from PyQt6.QtWidgets import (QApplication, QFileDialog, QMessageBox,
+                             QProgressDialog)
 from vstools import SPath
 
 __all__ = [
@@ -384,8 +385,30 @@ class FFmpegHandler:
                 warning('Skipping empty title (padding cells)')
                 return
 
+            if 'Unrecognized option' in error_output:
+                error(
+                    'Unrecognized option in FFmpeg command. '
+                    'Please ensure FFmpeg was built with GPL library support '
+                    'and the configure switches --enable-libdvdnav and --enable-libdvdread.'
+                    f'\n\n{error_output}',
+                )
+
+                QMessageBox.critical(
+                    self.parent,
+                    'Unrecognized option in FFmpeg command!',
+                    'Please ensure FFmpeg was built with GPL library support '
+                    'and is configured with --enable-libdvdnav and --enable-libdvdread.'
+                    f'\n\n{error_output}',
+                )
+                return
+
             error(f'FFmpeg process failed:\n{error_output}')
-            raise RuntimeError(f"Failed to dump titles:\n\n{error_output}")
+
+            QMessageBox.critical(
+                self.parent,
+                'Failed to dump titles',
+                f'Failed to dump titles:\n\n{error_output}',
+            )
 
     def _dump_title(self, title_idx: int, output_path: str, angle: int | None = None) -> None:
         """Dump a single title."""
