@@ -1,9 +1,8 @@
 from logging import debug, error
 from traceback import format_exc
-from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QFileDialog
 from vspreview import set_timecodes
 from vssource import Title
 
@@ -119,7 +118,7 @@ class ISOTreeManager:
             angle_item = QTreeWidgetItem(title_item, [f'Angle {angle} ({angle_duration})'])
             angle_item.setData(0, Qt.ItemDataRole.UserRole, {'title': title_idx, 'angle': angle})
 
-    def _load_title(self, title_idx: int, angle: Optional[int]) -> Optional[Title]:
+    def _load_title(self, title_idx: int, angle: int | None) -> Title | None:
         """Load title and store its info."""
 
         try:
@@ -174,7 +173,7 @@ class ISOTreeManager:
             error(error_mapping['load_title_failed'].format(title_idx, angle, e, format_exc()))
             return None
 
-    def _get_audio_tracks(self, title: Title, title_idx: int, angle: Optional[int]) -> list[str]:
+    def _get_audio_tracks(self, title: Title, title_idx: int, angle: int | None) -> list[str]:
         """Get audio tracks safely."""
 
         audio_tracks = []
@@ -224,7 +223,7 @@ class ISOTreeManager:
             error(error_mapping['load_title_failed'].format(title_idx, angle, e, format_exc()))
             raise
 
-    def _load_selected_title(self, title_idx: int, angle: Optional[int]) -> None:
+    def _load_selected_title(self, title_idx: int, angle: int | None) -> None:
         """Load and display the selected title."""
 
         if not (info := self.parent.title_info.get((title_idx, angle))):
@@ -260,7 +259,7 @@ class ISOTreeManager:
         self._update_outputs(title_idx, angle)
         self._populate_chapters_tree(info)
 
-    def _update_outputs(self, title_idx: int, angle: Optional[int]) -> None:
+    def _update_outputs(self, title_idx: int, angle: int | None) -> None:
         """Update the outputs with the new video and audio nodes and load chapters as scenechanges."""
 
         main = self.parent.plugin.main
@@ -464,5 +463,5 @@ debug_mapping: dict[str, str] = {
     'updating_chapter_start': 'Updating chapter start: title_key={}, value={}',
     'current_title_info': 'Current title_info before update: {}',
     'updated_title_info': 'Updated title_info: {}',
-    'updating_chapter_end': 'Updating chapter end: title_key={}, value={}'
+    'updating_chapter_end': 'Updating chapter end: title_key={}, value={}',
 }

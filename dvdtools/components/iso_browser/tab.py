@@ -50,6 +50,7 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
         self.current_node: vs.VideoNode | None = None
         self.current_title: Title | None = None
+        self._last_source_path = SPath('.')
 
     def setup_ui(self) -> None:
         """Set up the user interface."""
@@ -66,12 +67,15 @@ class IsoBrowserTab(AbstractSettingsWidget):
         """Handle ISO file loading."""
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, 'Select ISO/IFO file', '', 'DVD files (*.iso *.ifo);;All files (*.*)'
+            self, 'Select ISO/IFO file', self.last_source_path.to_str(),
+            'DVD files (*.iso *.ifo);;All files (*.*)'
         )
 
         if not file_path:
             debug(debug_mapping['no_file_selected'])
             return
+
+        self._last_source_path = SPath(file_path)
 
         try:
             debug(debug_mapping['loading_iso'].format(file_path))
@@ -137,7 +141,13 @@ class IsoBrowserTab(AbstractSettingsWidget):
 
                 for angle in range(angle_count):
                     items_processed += 1
-                    progress.setLabelText(debug_mapping['loading_title_angle'].format(title_idx, total_titles, angle + 1, angle_count))
+
+                    if angle_count > 1:
+                        progress.setLabelText(debug_mapping['loading_title_angle'].\
+                            format(title_idx, total_titles, angle + 1, angle_count))
+                    else:
+                        progress.setLabelText(debug_mapping['loading_title'].format(title_idx, total_titles))
+
                     progress.setValue(min(int(items_processed * progress_per_item), 100))
                     QApplication.processEvents()
 
@@ -324,6 +334,26 @@ class IsoBrowserTab(AbstractSettingsWidget):
             self._reset_iso_state()
             QMessageBox.critical(self, 'Error', error_mapping['load_failed_dialog'].format(dialog_texts['error'], str(e)))
 
+    @property
+    def last_source_path(self) -> SPath:
+        """Last source path used."""
+
+        if not hasattr(self, '_last_source_path'):
+            self._last_source_path = SPath('.')
+        elif not self._last_source_path.exists():
+            debug(debug_mapping['source_path_not_found'].format(self._last_source_path))
+            self._last_source_path = SPath('.')
+
+        return self._last_source_path
+
+    @last_source_path.setter
+    def last_source_path(self, path: SPath) -> None:
+        """Set the last source path."""
+
+        if path != self._last_source_path:
+            self._last_source_path = path
+            debug(debug_mapping['source_path_updated'].format(path))
+
 
 dialog_text_map = {
     '.iso': {
@@ -360,5 +390,8 @@ debug_mapping: dict[str, str] = {
     'no_dvd_loaded': 'No DVD loaded',
     'frame_update_failed': 'Failed to update frame: {}\n{}',
     'iso_not_found': 'Previously saved ISO file no longer exists: {}',
-    'loading_saved_state': 'Loading saved ISO state: {}'
+    'loading_saved_state': 'Loading saved ISO state: {}',
+    'last_source_path': 'Last source path: {}',
+    'source_path_not_found': 'Last source path no longer exists: {}',
+    'source_path_updated': 'Source path updated to: {}',
 }
